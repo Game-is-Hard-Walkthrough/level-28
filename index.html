@@ -1,0 +1,236 @@
+<!-- index.html: Mini clone of "Game is Hard" Level 28 (tilt-to-inflate) -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Game is Hard — Level 28 Mini Clone</title>
+  <style>
+    html, body { height: 100%; margin: 0; background: #151515; color: #eaeaea; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    .wrap { height: 100%; display: grid; place-items: center; }
+    .card { width: min(720px, 92vw); padding: 18px; border-radius: 14px; background: #1f1f1f; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+    .title { font-size: 18px; margin: 0 0 8px; letter-spacing: .2px; }
+    .subtitle { margin: 0 0 14px; color: #bdbdbd; line-height: 1.35; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 10px 0 0; }
+    button { cursor: pointer; border: 0; border-radius: 10px; padding: 10px 12px; background: #7c3aed; color: white; font-weight: 650; }
+    button.secondary { background: #2f2f2f; }
+    .hud { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; color: #bdbdbd; font-size: 13px; }
+    .hud span { background: #262626; padding: 6px 10px; border-radius: 999px; }
+    canvas { width: 100%; height: 360px; display: block; background: #141414; border-radius: 14px; margin-top: 14px; }
+    .ok { color: #7CFF7C; font-weight: 700; }
+    .warn { color: #ffd166; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <p class="title">Level 28: <span class="warn">make them bigger!</span></p>
+      <p class="subtitle">
+        Tilt the device toward each dot and hold. No pinch. No tapping.
+        Desktop fallback: use arrow keys.
+      </p>
+
+      <div class="row">
+        <button id="btnPerm">Enable Tilt Controls</button>
+        <button id="btnReset" class="secondary">Reset</button>
+      </div>
+
+      <div class="hud">
+        <span>Input: <strong id="inputMode">keyboard</strong></span>
+        <span>γ (left/right): <strong id="g">0</strong>°</span>
+        <span>β (front/back): <strong id="b">0</strong>°</span>
+        <span>Status: <strong id="status">grow all 3</strong></span>
+      </div>
+
+      <canvas id="c" width="720" height="360" aria-label="Game area"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("c");
+    const ctx = canvas.getContext("2d");
+
+    const elMode = document.getElementById("inputMode");
+    const elG = document.getElementById("g");
+    const elB = document.getElementById("b");
+    const elStatus = document.getElementById("status");
+
+    const btnPerm = document.getElementById("btnPerm");
+    const btnReset = document.getElementById("btnReset");
+
+    // Fill values: 0..1
+    const dots = [
+      { key: "left",  x: 220, y: 220, fill: 0 },
+      { key: "right", x: 500, y: 220, fill: 0 },
+      { key: "top",   x: 360, y: 140, fill: 0 },
+    ];
+
+    // Tilt thresholds (degrees)
+    const THRESH = 22;     // how far you must tilt to "feed" a dot
+    const RATE = 0.55;     // fill per second while feeding
+    const DECAY = 0.00;    // set > 0 if you want dots to shrink when not fed
+
+    let useTilt = false;
+
+    // Current input signals (normalized -1..1-ish)
+    let gamma = 0; // left/right
+    let beta = 0;  // front/back
+    let kx = 0;    // keyboard left/right
+    let ky = 0;    // keyboard up/down
+
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+    function setStatus(text, ok=false) {
+      elStatus.textContent = text;
+      elStatus.className = ok ? "ok" : "";
+    }
+
+    function allDone() {
+      return dots.every(d => d.fill >= 1);
+    }
+
+    function reset() {
+      dots.forEach(d => d.fill = 0);
+      setStatus("grow all 3");
+    }
+
+    btnReset.addEventListener("click", reset);
+
+    async function enableTilt() {
+      // iOS Safari requires permission via user gesture.
+      if (typeof DeviceOrientationEvent !== "undefined" &&
+          typeof DeviceOrientationEvent.requestPermission === "function") {
+        const res = await DeviceOrientationEvent.requestPermission();
+        if (res !== "granted") return false;
+      }
+      useTilt = true;
+      elMode.textContent = "tilt";
+      return true;
+    }
+
+    btnPerm.addEventListener("click", async () => {
+      try {
+        const ok = await enableTilt();
+        if (!ok) setStatus("tilt permission denied");
+      } catch (e) {
+        setStatus("tilt not supported here");
+      }
+    });
+
+    // Device orientation
+    window.addEventListener("deviceorientation", (e) => {
+      if (!useTilt) return;
+      // gamma: left/right (-90..90), beta: front/back (-180..180)
+      gamma = (typeof e.gamma === "number") ? e.gamma : 0;
+      beta = (typeof e.beta === "number") ? e.beta : 0;
+
+      elG.textContent = Math.round(gamma);
+      elB.textContent = Math.round(beta);
+    }, { passive: true });
+
+    // Keyboard fallback
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft")  kx = -1;
+      if (e.key === "ArrowRight") kx =  1;
+      if (e.key === "ArrowUp")    ky = -1; // treat "up" as feeding top dot
+      if (e.key === "ArrowDown")  ky =  1;
+    });
+
+    window.addEventListener("keyup", (e) => {
+      if (e.key === "ArrowLeft"  && kx === -1) kx = 0;
+      if (e.key === "ArrowRight" && kx ===  1) kx = 0;
+      if (e.key === "ArrowUp"    && ky === -1) ky = 0;
+      if (e.key === "ArrowDown"  && ky ===  1) ky = 0;
+    });
+
+    function feedSignals() {
+      // Convert to three "feed booleans" based on direction.
+      // Left dot: tilt left => gamma < -THRESH
+      // Right dot: tilt right => gamma >  THRESH
+      // Top dot: tilt "up" (top edge away from you) => beta < -THRESH
+      // (Depending on device, you might prefer beta > THRESH. This matches common “tilt away” behavior.)
+      if (useTilt) {
+        return {
+          left:  gamma < -THRESH,
+          right: gamma >  THRESH,
+          top:   beta  < -THRESH
+        };
+      }
+      // keyboard
+      return {
+        left:  kx < 0,
+        right: kx > 0,
+        top:   ky < 0
+      };
+    }
+
+    function update(dt) {
+      const feed = feedSignals();
+
+      for (const d of dots) {
+        const on = !!feed[d.key];
+        if (on) d.fill = clamp(d.fill + RATE * dt, 0, 1);
+        else if (DECAY > 0) d.fill = clamp(d.fill - DECAY * dt, 0, 1);
+      }
+
+      if (allDone()) setStatus("PASS", true);
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Instruction text
+      ctx.fillStyle = "#b087ff";
+      ctx.font = "24px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+      ctx.fillText("make them bigger!", 24, 44);
+
+      // Dots
+      for (const d of dots) {
+        const base = 10;
+        const maxAdd = 48;
+        const r = base + maxAdd * d.fill;
+
+        // Shadow
+        ctx.beginPath();
+        ctx.fillStyle = "rgba(0,0,0,.35)";
+        ctx.arc(d.x + 4, d.y + 6, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Dot body
+        ctx.beginPath();
+        ctx.fillStyle = "#b087ff";
+        ctx.arc(d.x, d.y, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Progress ring
+        ctx.beginPath();
+        ctx.strokeStyle = "rgba(255,255,255,.18)";
+        ctx.lineWidth = 6;
+        ctx.arc(d.x, d.y, r + 10, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * d.fill));
+        ctx.stroke();
+      }
+
+      // Hint footer
+      ctx.fillStyle = "#9d9d9d";
+      ctx.font = "14px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+      ctx.fillText(useTilt ? "Tilt toward a dot and hold." : "Use arrow keys (Left, Right, Up).", 24, 332);
+
+      if (allDone()) {
+        ctx.fillStyle = "#7CFF7C";
+        ctx.font = "700 42px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+        ctx.fillText("PASS", 560, 62);
+      }
+    }
+
+    let last = performance.now();
+    function loop(now) {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      update(dt);
+      draw();
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
